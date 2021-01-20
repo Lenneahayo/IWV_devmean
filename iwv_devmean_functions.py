@@ -9,17 +9,18 @@ import time
 import os,glob
 import re
 
-def offzen_data(t,azi,prw_offzen,elevation):
+def offzen_data(t,azi,prw_offzen,elevation,flag):
     """
     Written by Lennéa Hayo, 2020-11-13
     
     Organizes data, collected at an elevation angle of ca. 30 (off zenith), on a fixed grid of 48x72. 
-    Every scan is made up of two rounds of data, which are meaned and air mass corrected.
+    Every scan is made up of two rounds of data, which are meaned and air mass corrected. Data where the instrument
+    "looks" directly into the sun is exchanged for NaN.
     
     Parameters: 
         t: time data in seconds since 1970-01-01 00:00:00 UTC
         azi: sensor azimuth angle (0=North, 90=East, 180=South, 270=West)
-        prw_offzen: off zenith path integrated water vapor
+        prw_offzen: off zenith path integrated water vapor 
         elevation: retrieval elevation angle
         
     Returns:
@@ -27,7 +28,7 @@ def offzen_data(t,azi,prw_offzen,elevation):
         time_ofday: time when data was taken in (hours + portion of minutes)
         airmass_corr: air mass corrected data
     """
-    data_list = list(zip(t,elevation,prw_offzen,azi))
+    data_list = list(zip(t,elevation,prw_offzen,azi,flag))
     azi_pre = np.zeros((48,72))
     airmass_corr = np.full((48,72),np.nan)
     time_ofday = np.stack([np.full(72, x) for x in np.array(range(48))/2])
@@ -63,10 +64,16 @@ def offzen_data(t,azi,prw_offzen,elevation):
         #organizing data onto 48x72 grid and taking the mean of two scans
         if j < 72:
             azi_pre[i,j] = data[3]
-            airmass_corr[i,j] = np.sin(np.deg2rad(data[1]))*data[2]
-            time_ofday[i,j] = result_time.tm_hour + (result_time.tm_min/60) 
+            time_ofday[i,j] = result_time.tm_hour + (result_time.tm_min/60)
+            if data[4] & 0b1000000:
+                airmass_corr[i,j] = np.nan
+            else:    
+                airmass_corr[i,j] = np.sin(np.deg2rad(data[1]))*data[2]
         elif j < 144:
-            airmass_corr[i,j-72] = (np.sin(np.deg2rad(data[1]))*data[2] + airmass_corr[i,j-72])/2
+            if data[4] & 0b1000000:
+                airmass_corr[i,j-72] = np.nan
+            else:
+                airmass_corr[i,j-72] = (np.sin(np.deg2rad(data[1]))*data[2] + airmass_corr[i,j-72])/2
         elif print_warning:
             print('Warning: array too long, data taken out')
             print_warning=False
@@ -78,7 +85,7 @@ def offzen_data(t,azi,prw_offzen,elevation):
     #safety, should not arise
     if not 'azimuth' in locals():
         raise Exception('Azimuth not defined. No scan data available')
-    return azimuth, time_ofday, airmass_corr 
+    return azimuth, time_ofday, airmass_corr   
 
 
 
@@ -249,9 +256,10 @@ def daily_devmean_scan(filename):
     azi = np.array(iwv_data['azi'])
     elevation = np.array(iwv_data['ele'])
     prw_offzen = np.array(iwv_data['prw_off_zenith'])
+    flag = np.array(iwv_data['flag'])
     
-    azimuth, time_ofday, airmass_corr = offzen_data(t,azi,prw_offzen,elevation)
+    azimuth, time_ofday, airmass_corr = offzen_data(t,azi,prw_offzen,elevation,flag)
     azimuth, airmass_corr = azi_sort(azimuth, airmass_corr)
     
     #plotting function
-    dev_mean(time_ofday,azimuth,airmass_corr,savefilename,titledate) 
+    dev_mean(time_ofday,azimuth,airmass_corr,savefilename,titledate)
